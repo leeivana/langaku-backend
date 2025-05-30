@@ -16,6 +16,30 @@ from .serializers import (
     IdempotencyKeySerializer,
     CartItemSerializer,
 )
+from .constants import (
+    USER_ID,
+    CART_ID,
+    ITEM_ID,
+    IDEMPOTENCY_KEY_HEADER,
+    IDEMPOTENCY_KEY,
+    QUANTITY,
+    PRODUCT_ID,
+    NAME,
+    MIN_PRICE,
+    MAX_PRICE,
+)
+
+
+def validate_integer(val):
+    try:
+        val = int(val)
+    except (ValueError, TypeError):
+        # Catching for value error and type error
+        # Type error if value is incompatible
+        # Value error if value cannot be converted
+        return None, False
+
+    return val, True
 
 
 # Disable CSRF check for this assigment
@@ -41,7 +65,27 @@ def initialize_data(request):
 
 class ItemViewSet(viewsets.ViewSet):
     def list(self, request):
+        # Getting name, min price and max price from query params
+        name = request.query_params.get(NAME)
+        min_price, is_min_valid = validate_integer(request.query_params.get(MIN_PRICE))
+        max_price, is_max_valid = validate_integer(request.query_params.get(MAX_PRICE))
+        if not is_max_valid or not is_min_valid:
+            return Response(
+                {"error": "Min and Max values must be an integer"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         items = Item.objects.all()
+
+        if name:
+            items = items.filter(name__icontains=name)
+
+        if min_price:
+            items = items.filter(price__gte=min_price)
+
+        if max_price:
+            items = items.filter(price__lte=max_price)
+
         serializer = ItemSerializer(items, many=True)
         return Response({"items": serializer.data}, status=status.HTTP_200_OK)
 
@@ -54,6 +98,12 @@ class CartViewSet(viewsets.ViewSet):
         if not cart_id:
             return Response(
                 {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cart_id, is_valid = validate_integer(cart_id)
+        if not is_valid:
+            return Response(
+                {"error": "Invalid Cart Id"}, status=status.HTTP_400_BAD_REQUEST
             )
 
         cart_items = CartItem.objects.filter(cart_id=cart_id)
@@ -71,6 +121,7 @@ class CartViewSet(viewsets.ViewSet):
                 "quantity": product.quantity,
                 "requested_quantity": cart_item.quantity,
                 "price": product.price,
+                # is_out_of_stock is defined by whether or not the requested quantity is available
                 "is_out_of_stock": product.quantity < cart_item.quantity,
             }
             response.append(item_data)
@@ -79,19 +130,36 @@ class CartViewSet(viewsets.ViewSet):
 
     @csrf_exempt
     @action(detail=False, methods=["delete"])
-    def delete_item(self, request, cart_id=None, item_id=None):
-        if not cart_id:
+    def delete_item(self, request):
+        cart_id, is_cart_id_valid = validate_integer(request.data.get(CART_ID))
+        if not is_cart_id_valid:
             return Response(
-                {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Valid Cart Id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not item_id:
+        user_id, is_valid_user_id = validate_integer(request.data.get(USER_ID))
+        if not is_valid_user_id:
             return Response(
-                {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Valid User Id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        item_id, is_valid_item_id = validate_integer(request.data.get(ITEM_ID))
+        if not is_valid_item_id:
+            return Response(
+                {"error": "Valid Item Id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             cart_item = CartItem.objects.get(id=item_id, cart_id=cart_id)
+            user = User.objects.get(id=user_id)
+            if cart_item.cart.user != user:
+                return Response(
+                    {"response": "Cannot modify cart"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         except CartItem.DoesNotExist:
             return Response(
                 {"error": "Cart item does not exist"},
@@ -108,22 +176,30 @@ class CartViewSet(viewsets.ViewSet):
     @csrf_exempt
     @action(detail=False, methods=["post"])
     def add(self, request):
-        user_id = request.data.get("user_id")
-        if not user_id:
+        user_id, is_valid_user_id = validate_integer(request.data.get(USER_ID))
+        if not is_valid_user_id:
             return Response(
-                {"error": "User Id is required"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Valid User Id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        quantity = int(request.data.get("quantity"))
-        if not quantity:
+        quantity, is_valid = validate_integer(request.data.get(QUANTITY))
+        if not is_valid:
             return Response(
                 {"error": "Quantity is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        product_id = request.data.get("product_id")
-        if not product_id:
+        if quantity <= 0:
             return Response(
-                {"error": "Product Id is required"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Quantity must be a positive integer"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        product_id, is_valid_product_id = validate_integer(request.data.get(PRODUCT_ID))
+        if not is_valid_product_id:
+            return Response(
+                {"error": "Valid Product Id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
@@ -162,34 +238,36 @@ class CartViewSet(viewsets.ViewSet):
 
             serializer = CartSerializer(cart, many=False)
             return Response({"response": serializer.data}, status=status.HTTP_200_OK)
-
-        return Response(
-            {"error": "Requested quantity is not available"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        else:
+            return Response(
+                {"error": "Requested quantity is not available"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @csrf_exempt
     @action(detail=False, methods=["post"])
     def purchase(self, request):
-        idempotency_key = request.headers.get("Idempotency-Key") or request.data.get(
-            "idempotency_key"
-        )
+        # Idempotency key is always required (either through request headers or in request data)
+        idempotency_key = request.headers.get(
+            IDEMPOTENCY_KEY_HEADER
+        ) or request.data.get(IDEMPOTENCY_KEY)
         if not idempotency_key:
             return Response(
                 {"error": "Idempotency key is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user_id = request.data.get("user_id")
-        if not user_id:
+        user_id, is_valid_user_id = validate_integer(request.data.get(USER_ID))
+        if not is_valid_user_id:
             return Response(
                 {"error": "User Id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        cart_id = int(request.data.get("cart_id"))
-        if not cart_id:
+        cart_id, is_valid_cart_id = validate_integer((request.data.get(CART_ID)))
+        if not is_valid_cart_id:
             return Response(
-                {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Valid Cart id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
@@ -208,10 +286,12 @@ class CartViewSet(viewsets.ViewSet):
                 status=status.HTTP_200_OK,
             )
         except IdempotencyKey.DoesNotExist:
+            # Skipping if idempotency key does not exist as it is created before returning response
             pass
 
         try:
-            cart = Cart.objects.get(id=cart_id)
+            # Fetching cart by id and user
+            cart = Cart.objects.get(id=cart_id, user=user)
         except Cart.DoesNotExist:
             return Response(
                 {"error": "Cart does not exist"},
@@ -237,7 +317,7 @@ class CartViewSet(viewsets.ViewSet):
                 UserPurchaseRecord.objects.create(
                     user=user, item=cart_item.item, quantity=cart_item.quantity
                 )
-                product.quantity = -cart_item.quantity
+                product.quantity -= cart_item.quantity
                 product.save()
 
             cart.delete()
