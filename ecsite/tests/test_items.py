@@ -1,16 +1,14 @@
-from rest_framework.test import APITestCase
-from ecsite.models import Item, User
-from .helpers import generate_str, random_int
 from rest_framework import status
+from .base import AuthenticatedTestCase, ITEM_COUNT
 
 
-ITEM_COUNT = 5
-MAX_PRICE = 100
-MIN_PRICE = 50
 ITEMS_URL = "/api/v1/items/"
 
 
-class TestItemAPI(APITestCase):
+class TestItemAPI(AuthenticatedTestCase):
+    def setUp(self):
+        super().setUp()
+
     def validate_items(self, items, arrType):
         for item in items:
             item_name = item["name"]
@@ -18,25 +16,6 @@ class TestItemAPI(APITestCase):
             self.assertTrue(original)
             self.assertEqual(original.price, item["price"])
             self.assertEqual(original.quantity, item["quantity"])
-
-    def create_item(self, min, max) -> dict:
-        item_dict = {}
-        for _ in range(ITEM_COUNT):
-            name = generate_str()
-            item = Item.objects.create(
-                name=name,
-                price=random_int(min, max),
-                quantity=random_int(min, max),
-            )
-            item_dict[name] = item
-        return item_dict
-
-    def setUp(self):
-        self.user = User.objects.create_user(username="testuser", password="password")
-        self.client.login(username="testuser", password="password")
-
-        self.cheaper_items = self.create_item(1, MIN_PRICE)
-        self.expensive_items = self.create_item(MIN_PRICE + 1, MAX_PRICE)
 
     def test_search_items(self):
         response = self.client.get(ITEMS_URL)

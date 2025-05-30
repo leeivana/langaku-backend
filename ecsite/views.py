@@ -23,7 +23,6 @@ from .constants import (
     IDEMPOTENCY_KEY_HEADER,
     IDEMPOTENCY_KEY,
     QUANTITY,
-    PRODUCT_ID,
     NAME,
     MIN_PRICE,
     MAX_PRICE,
@@ -104,7 +103,7 @@ class CartViewSet(viewsets.ViewSet):
     authentication_classes = [CsrfExemptSessionAuthentication, BasicAuthentication]
     permission_classes = [IsAuthenticated]
 
-    def list(self, request, cart_id=None):
+    def list_items(self, req, cart_id=None):
         if not cart_id:
             return Response(
                 {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
@@ -117,10 +116,6 @@ class CartViewSet(viewsets.ViewSet):
             )
 
         cart_items = CartItem.objects.filter(cart_id=cart_id)
-        if not cart_items.exists():
-            return Response(
-                {"error": "No associated cart items"}, status=status.HTTP_404_NOT_FOUND
-            )
 
         response = []
         for cart_item in cart_items:
@@ -138,16 +133,14 @@ class CartViewSet(viewsets.ViewSet):
 
         return Response({"response": response}, status=status.HTTP_200_OK)
 
+    def list(self, request):
+        carts = Cart.objects.all()
+        serializer = CartSerializer(carts, many=True)
+        return Response({"carts": serializer.data}, status=status.HTTP_200_OK)
+
     @csrf_exempt
     @action(detail=False, methods=["delete"])
     def delete_item(self, request):
-        cart_id = validate_integer(request.data.get(CART_ID))
-        if cart_id is None:
-            return Response(
-                {"error": "Valid Cart Id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         user_id = validate_integer(request.data.get(USER_ID))
         if user_id is None:
             return Response(
@@ -161,15 +154,16 @@ class CartViewSet(viewsets.ViewSet):
                 {"error": "Valid Item Id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            cart = Cart.objects.get(user_id=user_id)
+        except Cart.DoesNotExist:
+            return Response(
+                {"error": "Cart does not exist for user"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         try:
-            cart_item = CartItem.objects.get(id=item_id, cart_id=cart_id)
-            user = User.objects.get(id=user_id)
-            if cart_item.cart.user != user:
-                return Response(
-                    {"response": "Cannot modify cart"},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+            cart_item = CartItem.objects.get(id=item_id, cart_id=cart.id)
         except CartItem.DoesNotExist:
             return Response(
                 {"error": "Cart item does not exist"},
@@ -177,9 +171,10 @@ class CartViewSet(viewsets.ViewSet):
             )
 
         cart_item.delete()
-
+        cart = Cart.objects.get(user_id=user_id)
+        serializer = CartSerializer(cart, many=False)
         return Response(
-            {"response": "Item successfully removed from cart"},
+            {"cart": serializer.data},
             status=status.HTTP_200_OK,
         )
 
@@ -205,22 +200,22 @@ class CartViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        product_id = validate_integer(request.data.get(PRODUCT_ID))
-        if product_id is None:
+        item_id = validate_integer(request.data.get(ITEM_ID))
+        if item_id is None:
             return Response(
-                {"error": "Valid Product Id is required"},
+                {"error": "Valid Item Id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            product = Item.objects.get(id=product_id)
+            item = Item.objects.get(id=item_id)
         except Item.DoesNotExist:
             return Response(
-                {"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND
+                {"error": "Item not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
         # Check if requested quantity is available
-        if product.quantity >= quantity:
+        if item.quantity >= quantity:
             # Get cart for user, if doesn't exist, create
             try:
                 cart = Cart.objects.get(user_id=user_id)
@@ -230,14 +225,14 @@ class CartViewSet(viewsets.ViewSet):
 
             cart_item, created = CartItem.objects.get_or_create(
                 cart=cart,
-                item=product,
+                item=item,
                 defaults={"quantity": quantity},
             )
 
             # Check if total request quantity is available
             if not created:
                 total_requested_quantity = cart_item.quantity + quantity
-                if product.quantity < total_requested_quantity:
+                if item.quantity < total_requested_quantity:
                     return Response(
                         {"error": "Requested quantity is not available"},
                         status=status.HTTP_400_BAD_REQUEST,
@@ -247,7 +242,7 @@ class CartViewSet(viewsets.ViewSet):
                 cart_item.save()
 
             serializer = CartSerializer(cart, many=False)
-            return Response({"response": serializer.data}, status=status.HTTP_200_OK)
+            return Response({"cart": serializer.data}, status=status.HTTP_200_OK)
         else:
             return Response(
                 {"error": "Requested quantity is not available"},
@@ -329,7 +324,7 @@ class CartViewSet(viewsets.ViewSet):
                     product = cart_item.item
                     if product.quantity < cart_item.quantity:
                         # Raising exception to rollback transaction
-                        raise Exception("Product does not have enough stock")
+                        raise Exception("Item does not have enough stock")
                     UserPurchaseRecord.objects.create(
                         user=user, item=cart_item.item, quantity=cart_item.quantity
                     )
