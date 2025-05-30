@@ -8,8 +8,13 @@ from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.core.management import call_command
-from .models import Item, Cart, CartItem, User, UserPurchaseRecord
-from .serializers import ItemSerializer, CartSerializer
+from .models import Item, Cart, CartItem, User, UserPurchaseRecord, IdempotencyKey
+from .serializers import (
+    ItemSerializer,
+    CartSerializer,
+    IdempotencyKeySerializer,
+    CartItemSerializer,
+)
 
 
 # Disable CSRF check for this assigment
@@ -47,7 +52,7 @@ class CartViewSet(viewsets.ViewSet):
     def list(self, request):
         items = Cart.objects.all()
         serializer = CartSerializer(items, many=True)
-        return Response({"items": serializer.data}, status=status.HTTP_200_OK)
+        return Response({"response": serializer.data}, status=status.HTTP_200_OK)
 
     @csrf_exempt
     @action(detail=False, methods=["post"])
@@ -118,7 +123,7 @@ class CartViewSet(viewsets.ViewSet):
                 cart_item.save()
 
             serializer = CartSerializer(cart, many=False)
-            return Response({"cart": serializer.data}, status=status.HTTP_200_OK)
+            return Response({"response": serializer.data}, status=status.HTTP_200_OK)
 
         return Response(
             {"error": "Requested quantity is not available"},
@@ -128,6 +133,15 @@ class CartViewSet(viewsets.ViewSet):
     @csrf_exempt
     @action(detail=False, methods=["post"])
     def purchase(self, request):
+        idempotency_key = request.headers.get("Idempotency-Key") or request.data.get(
+            "idempotency_key"
+        )
+        if not idempotency_key:
+            return Response(
+                {"error": "Idempotency key is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         user_id = request.data.get("user_id")
         if not user_id:
             return Response(
@@ -139,6 +153,24 @@ class CartViewSet(viewsets.ViewSet):
             return Response(
                 {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
+
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User does not exist"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        try:
+            idempotency_val = IdempotencyKey.objects.get(key=idempotency_key)
+            serializer = IdempotencyKeySerializer(idempotency_val, many=False)
+            return Response(
+                {"response": serializer.data.response_data},
+                status=status.HTTP_200_OK,
+            )
+        except IdempotencyKey.DoesNotExist:
+            pass
 
         try:
             cart = Cart.objects.get(id=cart_id)
@@ -155,24 +187,21 @@ class CartViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response(
-                {"error": "User does not exist"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
         # Looping through all cart items and updating quantity
         for cart_item in cart_items:
             UserPurchaseRecord.objects.create(
                 user=user, item=cart_item.item, quantity=cart_item.quantity
             )
             product = cart_item.item
-            product.quantity = product.quantity - cart_item.item.quantity
+            product.quantity = product.quantity - cart_item.quantity
             product.save()
 
         cart.delete()
-        return Response(
-            {"message": "Successfully purchased"}, status=status.HTTP_200_OK
+
+        serializer = CartItemSerializer(cart_items, many=True)
+
+        IdempotencyKey.objects.create(
+            user=user, key=idempotency_key, response_data=serializer.data
         )
+
+        return Response({"response": serializer.data}, status=status.HTTP_200_OK)

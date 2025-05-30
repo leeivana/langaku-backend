@@ -1,11 +1,17 @@
 from rest_framework import serializers
-from .models import CartItem, Item, Cart
+from .models import CartItem, Item, Cart, IdempotencyKey
 
 
 class ItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = Item
         fields = ["id", "name", "price", "quantity"]
+
+
+class IdempotencyKeySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IdempotencyKey
+        fields = ["key", "user", "created_at", "response_data"]
 
 
 class CartItemSerializer(serializers.ModelSerializer):

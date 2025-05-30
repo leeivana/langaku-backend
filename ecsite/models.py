@@ -2,10 +2,6 @@ from django.db import models
 from django.contrib.auth.models import User
 
 
-###############################################################################
-## TODO: Modify the following models as you request.
-
-
 class Item(models.Model):
     name = models.CharField(max_length=100)
     # Price is assumed to be in Yen without decimals.
@@ -16,6 +12,13 @@ class Item(models.Model):
 class Cart(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     items = models.ManyToManyField(Item, through="CartItem")
+
+
+class IdempotencyKey(models.Model):
+    key = models.CharField(max_length=100, null=False, unique=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    response_data = models.JSONField(null=True)
 
 
 class CartItem(models.Model):
