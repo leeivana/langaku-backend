@@ -27,6 +27,9 @@ from .constants import (
     NAME,
     MIN_PRICE,
     MAX_PRICE,
+    STATUS_SUCCESS,
+    STATUS_FAILED,
+    STATUS_PENDING,
 )
 
 
@@ -279,6 +282,7 @@ class CartViewSet(viewsets.ViewSet):
             )
 
         try:
+            # If idempotency key exists, the same transaction has already happened
             idempotency_val = IdempotencyKey.objects.get(key=idempotency_key)
             serializer = IdempotencyKeySerializer(idempotency_val, many=False)
             return Response(
@@ -286,8 +290,10 @@ class CartViewSet(viewsets.ViewSet):
                 status=status.HTTP_200_OK,
             )
         except IdempotencyKey.DoesNotExist:
-            # Skipping if idempotency key does not exist as it is created before returning response
-            pass
+            # Create new idempotency key if one doesn't exist
+            idempotency_val = IdempotencyKey.objects.create(
+                user=user, key=idempotency_key, status=STATUS_PENDING
+            )
 
         try:
             # Fetching cart by id and user
@@ -299,33 +305,45 @@ class CartViewSet(viewsets.ViewSet):
             )
 
         # Wrapping cart_item logic in atomic transaction for data consistency
-        with transaction.atomic():
-            # Using select_for_update to lock rows until transaction is completed
-            cart_items = CartItem.objects.filter(cart_id=cart_id).select_for_update()
-            if not cart_items.exists():
-                return Response(
-                    {"error": "No cart items for cart"},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+        try:
+            with transaction.atomic():
+                # Using select_for_update to lock rows until transaction is completed
+                cart_items = CartItem.objects.filter(
+                    cart_id=cart_id
+                ).select_for_update()
+                if not cart_items.exists():
+                    return Response(
+                        {"error": "No cart items for cart"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
 
-            # Looping through all cart items and updating quantity
-            for cart_item in cart_items:
-                product = cart_item.item
-                if product.quantity < cart_item.quantity:
-                    # Raising exception to rollback transaction
-                    raise Exception("Product does not have enough stock")
-                UserPurchaseRecord.objects.create(
-                    user=user, item=cart_item.item, quantity=cart_item.quantity
-                )
-                product.quantity -= cart_item.quantity
-                product.save()
+                # Looping through all cart items and updating quantity
+                for cart_item in cart_items:
+                    product = cart_item.item
+                    if product.quantity < cart_item.quantity:
+                        # Raising exception to rollback transaction
+                        raise Exception("Product does not have enough stock")
+                    UserPurchaseRecord.objects.create(
+                        user=user, item=cart_item.item, quantity=cart_item.quantity
+                    )
+                    product.quantity -= cart_item.quantity
+                    product.save()
 
-            cart.delete()
+                cart.delete()
+                serializer = CartItemSerializer(cart_items, many=True)
+                idempotency_val.response_data = serializer.data
+                idempotency_val.status = STATUS_SUCCESS
+                idempotency_val.save()
+        except Exception as e:
+            idempotency_val.status = STATUS_FAILED
+            idempotency_val.response_data = {"error": str(e)}
+            idempotency_val.save()
 
-        serializer = CartItemSerializer(cart_items, many=True)
-
-        IdempotencyKey.objects.create(
-            user=user, key=idempotency_key, response_data=serializer.data
+        return Response(
+            {"response": idempotency_val.response_data},
+            status=(
+                status.HTTP_200_OK
+                if idempotency_val.status == STATUS_SUCCESS
+                else status.HTTP_400_BAD_REQUEST
+            ),
         )
-
-        return Response({"response": serializer.data}, status=status.HTTP_200_OK)

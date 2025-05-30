@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from .constants import STATUS_CHOICES, STATUS_PENDING
 
 
 class Item(models.Model):
@@ -19,6 +20,9 @@ class IdempotencyKey(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=False)
     created_at = models.DateTimeField(auto_now_add=True)
     response_data = models.JSONField(null=True)
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
 
 
 class CartItem(models.Model):

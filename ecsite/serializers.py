@@ -11,7 +11,7 @@ class ItemSerializer(serializers.ModelSerializer):
 class IdempotencyKeySerializer(serializers.ModelSerializer):
     class Meta:
         model = IdempotencyKey
-        fields = ["key", "user", "created_at", "response_data"]
+        fields = ["key", "user", "created_at", "response_data", "status"]
 
 
 class CartItemSerializer(serializers.ModelSerializer):
