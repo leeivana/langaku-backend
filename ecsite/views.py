@@ -8,6 +8,8 @@ from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.core.management import call_command
+from .models import Item, Cart, CartItem, User, UserPurchaseRecord
+from .serializers import ItemSerializer, CartSerializer
 
 
 # Disable CSRF check for this assigment
@@ -22,6 +24,7 @@ def initialize_data(request):
         file_name = request.data.get("file", "MOCK_DATA.json")
         print(f"Initializing data from {file_name}")
         call_command("init_data", file=file_name)
+
         return Response(
             {"message": f"Data initialized successfully from {file_name}"},
             status=status.HTTP_200_OK,
@@ -30,13 +33,11 @@ def initialize_data(request):
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-###############################################################################
-## TODO: Implement the following views
-
-
 class ItemViewSet(viewsets.ViewSet):
     def list(self, request):
-        return Response({"message": "List of items"}, status=status.HTTP_200_OK)
+        items = Item.objects.all()
+        serializer = ItemSerializer(items, many=True)
+        return Response({"items": serializer.data}, status=status.HTTP_200_OK)
 
 
 class CartViewSet(viewsets.ViewSet):
@@ -44,16 +45,134 @@ class CartViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     def list(self, request):
-        return Response(
-            {"message": "List of items in the cart"}, status=status.HTTP_200_OK
-        )
+        items = Cart.objects.all()
+        serializer = CartSerializer(items, many=True)
+        return Response({"items": serializer.data}, status=status.HTTP_200_OK)
+
+    @csrf_exempt
+    @action(detail=False, methods=["post"])
+    def delete_item(self, request, cart_id=None, item_id=None):
+        if not cart_id:
+            return Response(
+                {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not item_id:
+            return Response(
+                {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
     @csrf_exempt
     @action(detail=False, methods=["post"])
     def add(self, request):
-        pass
+        user_id = request.data.get("user_id")
+        if not user_id:
+            return Response(
+                {"error": "User Id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        quantity = int(request.data.get("quantity"))
+        if not quantity:
+            return Response(
+                {"error": "Quantity is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        product_id = request.data.get("product_id")
+        if not product_id:
+            return Response(
+                {"error": "Product Id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            product = Item.objects.get(id=product_id)
+        except Item.DoesNotExist:
+            return Response(
+                {"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check if requested quantity is available
+        if product.quantity >= quantity:
+            # Get cart for user, if doesn't exist, create
+            try:
+                cart = Cart.objects.get(user_id=user_id)
+            except Cart.DoesNotExist:
+                user = User.objects.get(id=user_id)
+                cart = Cart.objects.create(user=user)
+
+            cart_item, created = CartItem.objects.get_or_create(
+                cart=cart,
+                item=product,
+                defaults={"quantity": quantity},
+            )
+
+            # Check if total request quantity is available
+            if not created:
+                total_requested_quantity = cart_item.quantity + quantity
+                if product.quantity < total_requested_quantity:
+                    return Response(
+                        {"error": "Requested quantity is not available"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                cart_item.quantity = total_requested_quantity
+                cart_item.save()
+
+            serializer = CartSerializer(cart, many=False)
+            return Response({"cart": serializer.data}, status=status.HTTP_200_OK)
+
+        return Response(
+            {"error": "Requested quantity is not available"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     @csrf_exempt
     @action(detail=False, methods=["post"])
     def purchase(self, request):
-        pass
+        user_id = request.data.get("user_id")
+        if not user_id:
+            return Response(
+                {"error": "User Id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cart_id = int(request.data.get("cart_id"))
+        if not cart_id:
+            return Response(
+                {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            cart = Cart.objects.get(id=cart_id)
+        except Cart.DoesNotExist:
+            return Response(
+                {"error": "Cart does not exist"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        cart_items = CartItem.objects.filter(cart_id=cart_id)
+        if not cart_items.exists():
+            return Response(
+                {"error": "No cart items for cart"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User does not exist"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Looping through all cart items and updating quantity
+        for cart_item in cart_items:
+            UserPurchaseRecord.objects.create(
+                user=user, item=cart_item.item, quantity=cart_item.quantity
+            )
+            product = cart_item.item
+            product.quantity = product.quantity - cart_item.item.quantity
+            product.save()
+
+        cart.delete()
+        return Response(
+            {"message": "Successfully purchased"}, status=status.HTTP_200_OK
+        )
