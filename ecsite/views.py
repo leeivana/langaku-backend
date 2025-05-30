@@ -50,13 +50,35 @@ class CartViewSet(viewsets.ViewSet):
     authentication_classes = [CsrfExemptSessionAuthentication, BasicAuthentication]
     permission_classes = [IsAuthenticated]
 
-    def list(self, request):
-        items = Cart.objects.all()
-        serializer = CartSerializer(items, many=True)
-        return Response({"response": serializer.data}, status=status.HTTP_200_OK)
+    def list(self, request, cart_id=None):
+        if not cart_id:
+            return Response(
+                {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cart_items = CartItem.objects.filter(cart_id=cart_id)
+        if not cart_items.exists():
+            return Response(
+                {"error": "No associated cart items"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        response = []
+        for cart_item in cart_items:
+            product = cart_item.item
+            item_data = {
+                "cart_item_id": cart_item.id,
+                "name": product.name,
+                "quantity": product.quantity,
+                "requested_quantity": cart_item.quantity,
+                "price": product.price,
+                "is_out_of_stock": product.quantity < cart_item.quantity,
+            }
+            response.append(item_data)
+
+        return Response({"response": response}, status=status.HTTP_200_OK)
 
     @csrf_exempt
-    @action(detail=False, methods=["post"])
+    @action(detail=False, methods=["delete"])
     def delete_item(self, request, cart_id=None, item_id=None):
         if not cart_id:
             return Response(
@@ -67,6 +89,21 @@ class CartViewSet(viewsets.ViewSet):
             return Response(
                 {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
+
+        try:
+            cart_item = CartItem.objects.get(id=item_id, cart_id=cart_id)
+        except CartItem.DoesNotExist:
+            return Response(
+                {"error": "Cart item does not exist"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        cart_item.delete()
+
+        return Response(
+            {"response": "Item successfully removed from cart"},
+            status=status.HTTP_200_OK,
+        )
 
     @csrf_exempt
     @action(detail=False, methods=["post"])
@@ -160,7 +197,7 @@ class CartViewSet(viewsets.ViewSet):
         except User.DoesNotExist:
             return Response(
                 {"error": "User does not exist"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         try:
