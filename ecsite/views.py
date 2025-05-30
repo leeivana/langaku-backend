@@ -33,16 +33,16 @@ from .constants import (
 )
 
 
-def validate_integer(val):
+def validate_integer(val) -> int:
     try:
         val = int(val)
     except (ValueError, TypeError):
         # Catching for value error and type error
         # Type error if value is incompatible
         # Value error if value cannot be converted
-        return None, False
+        return None
 
-    return val, True
+    return val
 
 
 # Disable CSRF check for this assigment
@@ -70,11 +70,18 @@ class ItemViewSet(viewsets.ViewSet):
     def list(self, request):
         # Getting name, min price and max price from query params
         name = request.query_params.get(NAME)
-        min_price, is_min_valid = validate_integer(request.query_params.get(MIN_PRICE))
-        max_price, is_max_valid = validate_integer(request.query_params.get(MAX_PRICE))
-        if not is_max_valid or not is_min_valid:
+        min_price_raw = request.query_params.get(MIN_PRICE)
+        min_price = validate_integer(min_price_raw)
+        if min_price is None and min_price_raw:
             return Response(
-                {"error": "Min and Max values must be an integer"},
+                {"error": "Min price must be a valid integer"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        max_price_raw = request.query_params.get(MAX_PRICE)
+        max_price = validate_integer(max_price_raw)
+        if max_price is None and max_price_raw:
+            return Response(
+                {"error": "Max price must be a valid integer"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -103,8 +110,8 @@ class CartViewSet(viewsets.ViewSet):
                 {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        cart_id, is_valid = validate_integer(cart_id)
-        if not is_valid:
+        cart_id = validate_integer(cart_id)
+        if cart_id is None:
             return Response(
                 {"error": "Invalid Cart Id"}, status=status.HTTP_400_BAD_REQUEST
             )
@@ -134,22 +141,22 @@ class CartViewSet(viewsets.ViewSet):
     @csrf_exempt
     @action(detail=False, methods=["delete"])
     def delete_item(self, request):
-        cart_id, is_cart_id_valid = validate_integer(request.data.get(CART_ID))
-        if not is_cart_id_valid:
+        cart_id = validate_integer(request.data.get(CART_ID))
+        if cart_id is None:
             return Response(
                 {"error": "Valid Cart Id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user_id, is_valid_user_id = validate_integer(request.data.get(USER_ID))
-        if not is_valid_user_id:
+        user_id = validate_integer(request.data.get(USER_ID))
+        if user_id is None:
             return Response(
                 {"error": "Valid User Id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        item_id, is_valid_item_id = validate_integer(request.data.get(ITEM_ID))
-        if not is_valid_item_id:
+        item_id = validate_integer(request.data.get(ITEM_ID))
+        if item_id is None:
             return Response(
                 {"error": "Valid Item Id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -179,15 +186,15 @@ class CartViewSet(viewsets.ViewSet):
     @csrf_exempt
     @action(detail=False, methods=["post"])
     def add(self, request):
-        user_id, is_valid_user_id = validate_integer(request.data.get(USER_ID))
-        if not is_valid_user_id:
+        user_id = validate_integer(request.data.get(USER_ID))
+        if user_id is None:
             return Response(
                 {"error": "Valid User Id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        quantity, is_valid = validate_integer(request.data.get(QUANTITY))
-        if not is_valid:
+        quantity = validate_integer(request.data.get(QUANTITY))
+        if quantity is None:
             return Response(
                 {"error": "Quantity is required"}, status=status.HTTP_400_BAD_REQUEST
             )
@@ -198,8 +205,8 @@ class CartViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        product_id, is_valid_product_id = validate_integer(request.data.get(PRODUCT_ID))
-        if not is_valid_product_id:
+        product_id = validate_integer(request.data.get(PRODUCT_ID))
+        if product_id is None:
             return Response(
                 {"error": "Valid Product Id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -260,14 +267,14 @@ class CartViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user_id, is_valid_user_id = validate_integer(request.data.get(USER_ID))
-        if not is_valid_user_id:
+        user_id = validate_integer(request.data.get(USER_ID))
+        if user_id is None:
             return Response(
                 {"error": "User Id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        cart_id, is_valid_cart_id = validate_integer((request.data.get(CART_ID)))
-        if not is_valid_cart_id:
+        cart_id = validate_integer((request.data.get(CART_ID)))
+        if cart_id is None:
             return Response(
                 {"error": "Valid Cart id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
