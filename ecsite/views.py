@@ -8,6 +8,7 @@ from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.core.management import call_command
+from django.db import transaction
 from .models import Item, Cart, CartItem, User, UserPurchaseRecord, IdempotencyKey
 from .serializers import (
     ItemSerializer,
@@ -180,23 +181,29 @@ class CartViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        cart_items = CartItem.objects.filter(cart_id=cart_id)
-        if not cart_items.exists():
-            return Response(
-                {"error": "No cart items for cart"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        # Wrapping cart_item logic in atomic transaction for data consistency
+        with transaction.atomic():
+            # Using select_for_update to lock rows until transaction is completed
+            cart_items = CartItem.objects.filter(cart_id=cart_id).select_for_update()
+            if not cart_items.exists():
+                return Response(
+                    {"error": "No cart items for cart"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
-        # Looping through all cart items and updating quantity
-        for cart_item in cart_items:
-            UserPurchaseRecord.objects.create(
-                user=user, item=cart_item.item, quantity=cart_item.quantity
-            )
-            product = cart_item.item
-            product.quantity = product.quantity - cart_item.quantity
-            product.save()
+            # Looping through all cart items and updating quantity
+            for cart_item in cart_items:
+                product = cart_item.item
+                if product.quantity < cart_item.quantity:
+                    # Raising exception to rollback transaction
+                    raise Exception("Product does not have enough stock")
+                UserPurchaseRecord.objects.create(
+                    user=user, item=cart_item.item, quantity=cart_item.quantity
+                )
+                product.quantity = -cart_item.quantity
+                product.save()
 
-        cart.delete()
+            cart.delete()
 
         serializer = CartItemSerializer(cart_items, many=True)
 
