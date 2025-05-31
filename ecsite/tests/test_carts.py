@@ -1,7 +1,14 @@
 from rest_framework import status
 from .base import AuthenticatedTestCase
 from ecsite.models import Cart, Item, IdempotencyKey
-from ecsite.constants import STATUS_SUCCESS
+from ecsite.constants import (
+    STATUS_SUCCESS,
+    USER_ID,
+    QUANTITY,
+    ITEM_ID,
+    IDEMPOTENCY_KEY,
+    IDEMPOTENCY_KEY_HEADER,
+)
 from uuid import uuid4
 
 CART_BASE_URL = "/api/v1/cart/"
@@ -13,6 +20,12 @@ class TestCartsAPI(AuthenticatedTestCase):
     def setUp(self):
         super().setUp()
 
+    def create_and_return_cart(self):
+        response = self.client.post(CART_BASE_URL, data={"user_id": self.user.id})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        return Cart.objects.get(user_id=self.user.id)
+
     # Get carts test
     def test_get_carts(self):
         response = self.client.get(CART_BASE_URL)
@@ -20,56 +33,82 @@ class TestCartsAPI(AuthenticatedTestCase):
         carts = response.data["carts"]
         self.assertEqual(len(carts), 1)
 
+    def test_create_cart_invalid_user_id(self):
+        response = self.client.post(CART_BASE_URL)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["error"], "Valid User Id is required")
+
+    def test_create_cart(self):
+        response = self.client.post(CART_BASE_URL, data={"user_id": self.user.id})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["cart"]["items"]), 0)
+
     # Add card item tests
     def test_add_cart_item_empty_payload(self):
-        response = self.client.post(f"{CART_BASE_URL}add/")
+        cart = self.create_and_return_cart()
+
+        response = self.client.post(f"{CART_BASE_URL}{cart.id}/items/")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Valid User Id is required")
 
     def test_add_cart_item_only_user_id(self):
+        cart = self.create_and_return_cart()
+
         response = self.client.post(
-            f"{CART_BASE_URL}add/", data={"user_id": self.user.id}
+            f"{CART_BASE_URL}{cart.id}/items/", data={USER_ID: self.user.id}
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Quantity is required")
 
     def test_add_cart_item_invalid_quantity(self):
+        cart = self.create_and_return_cart()
+
         response = self.client.post(
-            f"{CART_BASE_URL}add/",
-            data={"user_id": self.user.id, "quantity": INVALID_ID},
+            f"{CART_BASE_URL}{cart.id}/items/",
+            data={USER_ID: self.user.id, QUANTITY: INVALID_ID},
         )
+
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Quantity is required")
 
     def test_add_cart_item_negative_quantity(self):
+        cart = self.create_and_return_cart()
+
         response = self.client.post(
-            f"{CART_BASE_URL}add/",
-            data={"user_id": self.user.id, "quantity": -10},
+            f"{CART_BASE_URL}{cart.id}/items/",
+            data={USER_ID: self.user.id, QUANTITY: -10},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Quantity must be a positive integer")
 
     def test_add_cart_item_empty_item_id(self):
+        cart = self.create_and_return_cart()
+
         response = self.client.post(
-            f"{CART_BASE_URL}add/",
-            data={"user_id": self.user.id, "quantity": 1},
+            f"{CART_BASE_URL}{cart.id}/items/",
+            data={USER_ID: self.user.id, QUANTITY: 1},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Valid Item Id is required")
 
     def test_add_cart_item_invalid_item_id(self):
+        cart = self.create_and_return_cart()
+
         response = self.client.post(
-            f"{CART_BASE_URL}add/",
-            data={"user_id": self.user.id, "quantity": 1, "item_id": UNASSOCIATED_ID},
+            f"{CART_BASE_URL}{cart.id}/items/",
+            data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: UNASSOCIATED_ID},
         )
+
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(response.data["error"], "Item not found")
 
     def test_add_cart_item(self):
+        cart = self.create_and_return_cart()
+
         item = list(self.cheaper_items.values())[0]
         response = self.client.post(
-            f"{CART_BASE_URL}add/",
-            data={"user_id": self.user.id, "quantity": 1, "item_id": item.id},
+            f"{CART_BASE_URL}{cart.id}/items/",
+            data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: item.id},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         cart_items = response.data["cart"]["items"]
@@ -79,15 +118,14 @@ class TestCartsAPI(AuthenticatedTestCase):
         cart = Cart.objects.get(user_id=self.user.id)
         self.assertTrue(cart.items.exists())
 
-    def test_add_cart_invalid_quantity(self):
-        pass
-
     def test_add_cart_items(self):
+        cart = self.create_and_return_cart()
+
         items = list(self.cheaper_items.values())
         for item in items:
             response = self.client.post(
-                f"{CART_BASE_URL}add/",
-                data={"user_id": self.user.id, "quantity": 1, "item_id": item.id},
+                f"{CART_BASE_URL}{cart.id}/items/",
+                data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: item.id},
             )
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -99,13 +137,15 @@ class TestCartsAPI(AuthenticatedTestCase):
             self.assertTrue(item.id in cart_items)
 
     def test_add_cart_item_invalid_quantity(self):
+        cart = self.create_and_return_cart()
+
         item = list(self.cheaper_items.values())[0]
         response = self.client.post(
-            f"{CART_BASE_URL}add/",
+            f"{CART_BASE_URL}{cart.id}/items/",
             data={
-                "user_id": self.user.id,
-                "quantity": item.quantity + 1,
-                "item_id": item.id,
+                USER_ID: self.user.id,
+                QUANTITY: item.quantity + 1,
+                ITEM_ID: item.id,
             },
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -113,50 +153,58 @@ class TestCartsAPI(AuthenticatedTestCase):
 
     # Delete cart item test
     def test_delete_cart_item_invalid_user(self):
+        cart = self.create_and_return_cart()
+
         response = self.client.delete(
-            f"{CART_BASE_URL}delete_item/",
-            data={"user_id": INVALID_ID},
+            f"{CART_BASE_URL}{cart.id}/items/{UNASSOCIATED_ID}/",
+            data={USER_ID: INVALID_ID},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Valid User Id is required")
 
     def test_delete_cart_item_invalid_item(self):
+        cart = self.create_and_return_cart()
+
         response = self.client.delete(
-            f"{CART_BASE_URL}delete_item/",
-            data={"user_id": self.user.id, "item_id": INVALID_ID},
+            f"{CART_BASE_URL}{cart.id}/items/{INVALID_ID}/",
+            data={USER_ID: self.user.id},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Valid Item Id is required")
 
     def test_delete_cart_item_no_cart(self):
         response = self.client.delete(
-            f"{CART_BASE_URL}delete_item/",
-            data={"user_id": UNASSOCIATED_ID, "item_id": UNASSOCIATED_ID},
+            f"{CART_BASE_URL}{UNASSOCIATED_ID}/items/{UNASSOCIATED_ID}/",
+            data={USER_ID: UNASSOCIATED_ID},
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(response.data["error"], "Cart does not exist for user")
 
     def test_delete_cart_item_incorrect_item(self):
+        cart = self.create_and_return_cart()
+
+        cart = Cart.objects.get(user=self.user)
         response = self.client.delete(
-            f"{CART_BASE_URL}delete_item/",
-            data={"user_id": self.user.id, "item_id": UNASSOCIATED_ID},
+            f"{CART_BASE_URL}{cart.id}/items/{UNASSOCIATED_ID}/",
+            data={USER_ID: self.user.id},
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(response.data["error"], "Cart item does not exist")
 
     def test_delete_cart_item(self):
+        cart = self.create_and_return_cart()
         item = list(self.cheaper_items.values())[0]
         response = self.client.post(
-            f"{CART_BASE_URL}add/",
-            data={"user_id": self.user.id, "quantity": 1, "item_id": item.id},
+            f"{CART_BASE_URL}{cart.id}/items/",
+            data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: item.id},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         cart_items = response.data["cart"]["items"]
         self.assertEqual(len(cart_items), 1)
 
         response = self.client.delete(
-            f"{CART_BASE_URL}delete_item/",
-            data={"user_id": self.user.id, "item_id": item.id},
+            f"{CART_BASE_URL}{cart.id}/items/{item.id}/",
+            data={USER_ID: self.user.id},
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -166,7 +214,7 @@ class TestCartsAPI(AuthenticatedTestCase):
     # Purchase cart tests
     def test_purchase_cart_no_idempotency_key(self):
         response = self.client.post(
-            f"{CART_BASE_URL}purchase/",
+            f"{CART_BASE_URL}{UNASSOCIATED_ID}/purchase/",
             data={},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -174,32 +222,33 @@ class TestCartsAPI(AuthenticatedTestCase):
 
     def test_purchase_cart_no_user_id(self):
         response = self.client.post(
-            f"{CART_BASE_URL}purchase/",
-            data={"idempotency_key": uuid4()},
+            f"{CART_BASE_URL}{UNASSOCIATED_ID}/purchase/",
+            data={IDEMPOTENCY_KEY: uuid4()},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "User Id is required")
 
-    def test_purchase_cart_invalid_user_id(self):
+    def test_purchase_cart_invalid_cart_id(self):
         response = self.client.post(
-            f"{CART_BASE_URL}purchase/",
-            data={"idempotency_key": uuid4(), "user_id": UNASSOCIATED_ID},
+            f"{CART_BASE_URL}{UNASSOCIATED_ID}/purchase/",
+            data={IDEMPOTENCY_KEY: uuid4(), USER_ID: self.user.id},
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertEqual(response.data["error"], "User does not exist")
+        self.assertEqual(response.data["error"], "Cart does not exist")
 
     # Testing purchasing multiple (in-stock) items with idempotency_key in request body
     def test_purchase_cart_item(self):
+        cart = self.create_and_return_cart()
         item = list(self.cheaper_items.values())[0]
         response = self.client.post(
-            f"{CART_BASE_URL}add/",
-            data={"user_id": self.user.id, "quantity": 1, "item_id": item.id},
+            f"{CART_BASE_URL}{cart.id}/items/",
+            data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: item.id},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         response = self.client.post(
-            f"{CART_BASE_URL}purchase/",
-            data={"idempotency_key": uuid4(), "user_id": self.user.id},
+            f"{CART_BASE_URL}{cart.id}/purchase/",
+            data={IDEMPOTENCY_KEY: uuid4(), USER_ID: self.user.id},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -212,18 +261,19 @@ class TestCartsAPI(AuthenticatedTestCase):
 
     # Testing purchasing multiple (in-stock) items with Idempotency-Key header
     def test_purchase_cart_items(self):
+        cart = self.create_and_return_cart()
         items = list(self.cheaper_items.values())
         for item in items:
             response = self.client.post(
-                f"{CART_BASE_URL}add/",
-                data={"user_id": self.user.id, "quantity": 1, "item_id": item.id},
+                f"{CART_BASE_URL}{cart.id}/items/",
+                data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: item.id},
             )
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         response = self.client.post(
-            f"{CART_BASE_URL}purchase/",
-            data={"user_id": self.user.id},
-            headers={"Idempotency-Key": uuid4()},
+            f"{CART_BASE_URL}{cart.id}/purchase/",
+            data={USER_ID: self.user.id},
+            headers={IDEMPOTENCY_KEY_HEADER: uuid4()},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -236,16 +286,17 @@ class TestCartsAPI(AuthenticatedTestCase):
             self.assertEqual(updated_item.quantity, item.quantity - 1)
 
     def test_purchase_cart_reuse_idempotency_key(self):
+        cart = self.create_and_return_cart()
         item = list(self.cheaper_items.values())[0]
         self.client.post(
-            f"{CART_BASE_URL}add/",
-            data={"user_id": self.user.id, "quantity": 1, "item_id": item.id},
+            f"{CART_BASE_URL}{cart.id}/items/",
+            data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: item.id},
         )
 
         key_val = uuid4()
         response = self.client.post(
-            f"{CART_BASE_URL}purchase/",
-            data={"idempotency_key": key_val, "user_id": self.user.id},
+            f"{CART_BASE_URL}{cart.id}/purchase/",
+            data={IDEMPOTENCY_KEY: key_val, USER_ID: self.user.id},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -255,8 +306,8 @@ class TestCartsAPI(AuthenticatedTestCase):
         self.assertEqual(idempotency_key.response_data, response.data["response"])
 
         second_response = self.client.post(
-            f"{CART_BASE_URL}purchase/",
-            data={"idempotency_key": key_val, "user_id": self.user.id},
+            f"{CART_BASE_URL}{cart.id}/purchase/",
+            data={IDEMPOTENCY_KEY: key_val, USER_ID: self.user.id},
         )
 
         self.assertEqual(response.data, second_response.data)
@@ -265,10 +316,11 @@ class TestCartsAPI(AuthenticatedTestCase):
         self.assertEqual(updated_item.quantity, item.quantity - 1)
 
     def test_purchase_cart_item_no_stock(self):
+        cart = self.create_and_return_cart()
         item = list(self.cheaper_items.values())[0]
         self.client.post(
-            f"{CART_BASE_URL}add/",
-            data={"user_id": self.user.id, "quantity": 1, "item_id": item.id},
+            f"{CART_BASE_URL}{cart.id}/items/",
+            data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: item.id},
         )
 
         # Updating item quantity
@@ -276,19 +328,20 @@ class TestCartsAPI(AuthenticatedTestCase):
         item.save()
 
         response = self.client.post(
-            f"{CART_BASE_URL}purchase/",
-            data={"idempotency_key": uuid4(), "user_id": self.user.id},
+            f"{CART_BASE_URL}{cart.id}/purchase/",
+            data={IDEMPOTENCY_KEY: uuid4(), USER_ID: self.user.id},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Item does not have enough stock")
 
     # Checking if transaction is cancelled / no changes are made if one of the items is out of stock
     def test_purchase_cart_items_no_stock(self):
+        cart = self.create_and_return_cart()
         items = list(self.cheaper_items.values())
         for item in items:
             response = self.client.post(
-                f"{CART_BASE_URL}add/",
-                data={"user_id": self.user.id, "quantity": 1, "item_id": item.id},
+                f"{CART_BASE_URL}{cart.id}/items/",
+                data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: item.id},
             )
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -298,8 +351,8 @@ class TestCartsAPI(AuthenticatedTestCase):
         first_item.save()
 
         response = self.client.post(
-            f"{CART_BASE_URL}purchase/",
-            data={"idempotency_key": uuid4(), "user_id": self.user.id},
+            f"{CART_BASE_URL}{cart.id}/purchase/",
+            data={IDEMPOTENCY_KEY: uuid4(), USER_ID: self.user.id},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Item does not have enough stock")
