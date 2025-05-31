@@ -25,6 +25,6 @@ class AuthenticatedTestCase(APITestCase):
         self.user = User.objects.create_user(username="testuser", password="password")
         self.client.login(username="testuser", password="password")
 
-        self.cheaper_items = self.create_item(2, MIN_PRICE)
+        self.cheaper_items = self.create_item(2, MIN_PRICE - 1)
         self.expensive_items = self.create_item(MIN_PRICE + 1, MAX_PRICE)
         self.cart = Cart.objects.create(user=self.user)

@@ -1,5 +1,7 @@
 from rest_framework import status
 from .base import AuthenticatedTestCase, ITEM_COUNT
+from ecsite.models import Item
+from .base import MIN_PRICE
 
 
 ITEMS_URL = "/api/v1/items/"
@@ -36,7 +38,7 @@ class TestItemAPI(AuthenticatedTestCase):
         self.assertEqual(result["quantity"], first_item.quantity)
 
     def test_search_items_filter_max(self):
-        response = self.client.get(ITEMS_URL, data={"max_price": 50})
+        response = self.client.get(ITEMS_URL, data={"max_price": MIN_PRICE})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         items = response.data["items"]
         self.assertEqual(len(items), ITEM_COUNT)
@@ -48,7 +50,7 @@ class TestItemAPI(AuthenticatedTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_search_items_filter_min(self):
-        response = self.client.get(ITEMS_URL, data={"min_price": 50})
+        response = self.client.get(ITEMS_URL, data={"min_price": MIN_PRICE})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         items = response.data["items"]
         self.assertEqual(len(items), ITEM_COUNT)

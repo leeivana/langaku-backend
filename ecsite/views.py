@@ -18,7 +18,6 @@ from .serializers import (
 )
 from .constants import (
     USER_ID,
-    CART_ID,
     ITEM_ID,
     IDEMPOTENCY_KEY_HEADER,
     IDEMPOTENCY_KEY,
@@ -268,13 +267,6 @@ class CartViewSet(viewsets.ViewSet):
                 {"error": "User Id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        cart_id = validate_integer((request.data.get(CART_ID)))
-        if cart_id is None:
-            return Response(
-                {"error": "Valid Cart id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -288,7 +280,7 @@ class CartViewSet(viewsets.ViewSet):
             idempotency_val = IdempotencyKey.objects.get(key=idempotency_key)
             serializer = IdempotencyKeySerializer(idempotency_val, many=False)
             return Response(
-                {"response": serializer.data.response_data},
+                {"response": serializer.data["response_data"]},
                 status=status.HTTP_200_OK,
             )
         except IdempotencyKey.DoesNotExist:
@@ -299,11 +291,17 @@ class CartViewSet(viewsets.ViewSet):
 
         try:
             # Fetching cart by id and user
-            cart = Cart.objects.get(id=cart_id, user=user)
+            cart = Cart.objects.get(user=user)
         except Cart.DoesNotExist:
             return Response(
                 {"error": "Cart does not exist"},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not cart.items.exists():
+            return Response(
+                {"error": "Cart has no items"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Wrapping cart_item logic in atomic transaction for data consistency
@@ -311,7 +309,7 @@ class CartViewSet(viewsets.ViewSet):
             with transaction.atomic():
                 # Using select_for_update to lock rows until transaction is completed
                 cart_items = CartItem.objects.filter(
-                    cart_id=cart_id
+                    cart_id=cart.id
                 ).select_for_update()
                 if not cart_items.exists():
                     return Response(
@@ -341,11 +339,11 @@ class CartViewSet(viewsets.ViewSet):
             idempotency_val.response_data = {"error": str(e)}
             idempotency_val.save()
 
+            return Response(
+                idempotency_val.response_data, status=status.HTTP_400_BAD_REQUEST
+            )
+
         return Response(
             {"response": idempotency_val.response_data},
-            status=(
-                status.HTTP_200_OK
-                if idempotency_val.status == STATUS_SUCCESS
-                else status.HTTP_400_BAD_REQUEST
-            ),
+            status=status.HTTP_200_OK,
         )

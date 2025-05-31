@@ -1,6 +1,5 @@
 # Request Constants
 USER_ID = "user_id"
-CART_ID = "cart_id"
 ITEM_ID = "item_id"
 QUANTITY = "quantity"
 NAME = "name"
