@@ -5,8 +5,8 @@ from ecsite.constants import (
     USER_ID,
     QUANTITY,
     ITEM_ID,
+    ERROR_MESSAGES,
 )
-from uuid import uuid4
 
 CART_BASE_URL = "/api/v1/cart/"
 UNASSOCIATED_ID = 123123123
@@ -24,7 +24,8 @@ class TestCartItemsAPI(AuthenticatedTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn(USER_ID, response.data["error"])
         self.assertEqual(
-            response.data["error"][USER_ID][0], "Valid User Id is required"
+            response.data["error"][USER_ID][0],
+            ERROR_MESSAGES["invalid_user_id"],
         )
 
     def test_add_cart_item_only_user_id(self):
@@ -36,7 +37,8 @@ class TestCartItemsAPI(AuthenticatedTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn(ITEM_ID, response.data["error"])
         self.assertEqual(
-            response.data["error"][ITEM_ID][0], "Valid Item Id is required"
+            response.data["error"][ITEM_ID][0],
+            ERROR_MESSAGES["invalid_item_id"],
         )
 
     def test_add_cart_item_invalid_quantity(self):
@@ -74,7 +76,8 @@ class TestCartItemsAPI(AuthenticatedTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn(ITEM_ID, response.data["error"])
         self.assertEqual(
-            response.data["error"][ITEM_ID][0], "Valid Item Id is required"
+            response.data["error"][ITEM_ID][0],
+            ERROR_MESSAGES["invalid_item_id"],
         )
 
     def test_add_cart_item_invalid_item_id(self):
@@ -89,7 +92,7 @@ class TestCartItemsAPI(AuthenticatedTestCase):
         self.assertIn(ITEM_ID, response.data["error"])
         self.assertEqual(
             response.data["error"][ITEM_ID][0],
-            "No item associated with provided Id",
+            ERROR_MESSAGES["item_does_not_exist"],
         )
 
     def test_add_cart_item(self):
@@ -139,7 +142,10 @@ class TestCartItemsAPI(AuthenticatedTestCase):
             },
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(response.data["error"], "Requested quantity is not available")
+        self.assertEqual(
+            response.data["error"],
+            ERROR_MESSAGES["quantity_unavailable"],
+        )
 
     # Delete cart item test
     def test_delete_cart_item_invalid_user(self):
@@ -150,7 +156,10 @@ class TestCartItemsAPI(AuthenticatedTestCase):
             data={USER_ID: INVALID_ID},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(response.data["error"], "Valid User Id is required")
+        self.assertEqual(
+            response.data["error"],
+            ERROR_MESSAGES["invalid_user_id"],
+        )
 
     def test_delete_cart_item_invalid_item(self):
         cart = self.create_and_return_cart()
@@ -160,7 +169,10 @@ class TestCartItemsAPI(AuthenticatedTestCase):
             data={USER_ID: self.user.id},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(response.data["error"], "Valid Item Id is required")
+        self.assertEqual(
+            response.data["error"],
+            ERROR_MESSAGES["invalid_item_id"],
+        )
 
     def test_delete_cart_item_no_cart(self):
         response = self.client.delete(
@@ -168,7 +180,10 @@ class TestCartItemsAPI(AuthenticatedTestCase):
             data={USER_ID: UNASSOCIATED_ID},
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertEqual(response.data["error"], "No cart associated with provided Id")
+        self.assertEqual(
+            response.data["error"],
+            ERROR_MESSAGES["cart_does_not_exist"],
+        )
 
     def test_delete_cart_item_incorrect_item(self):
         cart = self.create_and_return_cart()
@@ -179,7 +194,7 @@ class TestCartItemsAPI(AuthenticatedTestCase):
             data={USER_ID: self.user.id},
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertEqual(response.data["error"], "Cart item does not exist")
+        self.assertEqual(response.data["error"], ERROR_MESSAGES["item_does_not_exist"])
 
     def test_delete_cart_item(self):
         cart = self.create_and_return_cart()

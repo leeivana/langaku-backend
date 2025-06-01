@@ -22,6 +22,16 @@ STATUS_CHOICES = [
 ]
 
 ERROR_MESSAGES = {
-    ITEM_ID: "Valid Item Id is required",
-    USER_ID: "Valid User Id is required",
+    "invalid_item_id": "Valid Item Id is required",
+    "item_does_not_exist": "No item associated with provided Id",
+    "invalid_user_id": "Valid User Id is required",
+    "user_does_not_exist": "No user associated with provided Id",
+    "invalid_cart_id": "Valid Cart Id is required",
+    "cart_does_not_exist": "No cart associated with provided Id",
+    "invalid_quantity": "Valid quantity is required",
+    "invalid_idempotency_key": "Valid idempotency key is required",
+    "quantity_unavailable": "Requested quantity is not available",
+    "invalid_min_price": "Min price must be a valid integer",
+    "invalid_max_price": "Max price must be a valid integer",
+    "no_cart_items": "Cart does not have any items",
 }

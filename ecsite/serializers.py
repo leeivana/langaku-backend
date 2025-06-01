@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import CartItem, Item, Cart, IdempotencyKey, User
+from .constants import ERROR_MESSAGES
 
 
 class ItemSerializer(serializers.ModelSerializer):
@@ -30,27 +31,27 @@ class AddCartItemSerializer(serializers.Serializer):
     user_id = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.all(),
         error_messages={
-            "required": "Valid User Id is required",
-            "does_not_exist": "No user associated with provided Id",
+            "required": ERROR_MESSAGES["invalid_user_id"],
+            "does_not_exist": ERROR_MESSAGES["user_does_not_exist"],
         },
     )
     item_id = serializers.PrimaryKeyRelatedField(
         queryset=Item.objects.all(),
         error_messages={
-            "required": "Valid Item Id is required",
-            "does_not_exist": "No item associated with provided Id",
+            "required": ERROR_MESSAGES["invalid_item_id"],
+            "does_not_exist": ERROR_MESSAGES["item_does_not_exist"],
         },
     )
     cart_id = serializers.PrimaryKeyRelatedField(
         queryset=Cart.objects.all(),
         error_messages={
-            "required": "Valid Cart Id is required",
-            "does_not_exist": "No cart associated with provided Id",
+            "required": ERROR_MESSAGES["invalid_cart_id"],
+            "does_not_exist": ERROR_MESSAGES["cart_does_not_exist"],
         },
     )
     quantity = serializers.IntegerField(
         min_value=1,
-        error_messages={"required": "Valid quantity is required"},
+        error_messages={"required": ERROR_MESSAGES["invalid_quantity"]},
     )
 
 
@@ -58,20 +59,20 @@ class PurchaseCartSerializer(serializers.Serializer):
     idempotency_key = serializers.CharField(
         max_length=100,
         error_messages={
-            "required": "Valid idempotency key is required",
-            "null": "Valid idempotency key is required",
+            "required": ERROR_MESSAGES["invalid_idempotency_key"],
+            "null": ERROR_MESSAGES["invalid_idempotency_key"],
         },
     )
     user_id = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.all(),
         error_messages={
-            "required": "Valid User Id is required",
-            "does_not_exist": "No user associated with provided Id",
+            "required": ERROR_MESSAGES["invalid_user_id"],
+            "does_not_exist": ERROR_MESSAGES["user_does_not_exist"],
         },
     )
     cart_id = serializers.IntegerField(
         error_messages={
-            "required": "Valid Cart Id is required",
-            "does_not_exist": "No cart associated with provided Id",
+            "required": ERROR_MESSAGES["invalid_cart_id"],
+            "does_not_exist": ERROR_MESSAGES["cart_does_not_exist"],
         },
     )

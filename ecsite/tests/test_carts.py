@@ -8,7 +8,7 @@ from ecsite.constants import (
     ITEM_ID,
     IDEMPOTENCY_KEY,
     IDEMPOTENCY_KEY_HEADER,
-    CART_ID,
+    ERROR_MESSAGES,
 )
 from uuid import uuid4
 from .constants import URL_MAP, CART_URL
@@ -31,7 +31,7 @@ class TestCartsAPI(AuthenticatedTestCase):
     def test_create_cart_invalid_user_id(self):
         response = self.client.post(CART_URL)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(response.data["error"], "Valid User Id is required")
+        self.assertEqual(response.data["error"], ERROR_MESSAGES["invalid_user_id"])
 
     def test_create_cart(self):
         response = self.client.post(CART_URL, data={"user_id": self.user.id})
@@ -48,7 +48,7 @@ class TestCartsAPI(AuthenticatedTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             response.data["error"][IDEMPOTENCY_KEY][0],
-            "Valid idempotency key is required",
+            ERROR_MESSAGES["invalid_idempotency_key"],
         )
 
     def test_purchase_cart_no_user_id(self):
@@ -59,7 +59,7 @@ class TestCartsAPI(AuthenticatedTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             response.data["error"][USER_ID][0],
-            "Valid User Id is required",
+            ERROR_MESSAGES["invalid_user_id"],
         )
 
     def test_purchase_cart_invalid_cart_id(self):

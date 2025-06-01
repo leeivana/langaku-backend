@@ -32,6 +32,7 @@ from .constants import (
     STATUS_FAILED,
     STATUS_PENDING,
     CART_ID,
+    ERROR_MESSAGES,
 )
 
 
@@ -45,6 +46,10 @@ def validate_integer(val) -> int:
         return None
 
     return val
+
+
+def format_error(message, status=status.HTTP_400_BAD_REQUEST) -> Response:
+    return Response({"error": message}, status=status)
 
 
 # Disable CSRF check for this assigment
@@ -77,11 +82,9 @@ def parse_serializer_error(serializer):
                 is_not_found = True
                 break
 
-    return Response(
-        {"error": errors},
-        status=(
-            status.HTTP_404_NOT_FOUND if is_not_found else status.HTTP_400_BAD_REQUEST
-        ),
+    return format_error(
+        errors,
+        status.HTTP_404_NOT_FOUND if is_not_found else status.HTTP_400_BAD_REQUEST,
     )
 
 
@@ -92,17 +95,12 @@ class ItemViewSet(viewsets.ViewSet):
         min_price_raw = request.query_params.get(MIN_PRICE)
         min_price = validate_integer(min_price_raw)
         if min_price is None and min_price_raw:
-            return Response(
-                {"error": "Min price must be a valid integer"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return format_error(ERROR_MESSAGES["invalid_min_price"])
+
         max_price_raw = request.query_params.get(MAX_PRICE)
         max_price = validate_integer(max_price_raw)
         if max_price is None and max_price_raw:
-            return Response(
-                {"error": "Max price must be a valid integer"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return format_error(ERROR_MESSAGES["invalid_max_price"])
 
         items = Item.objects.all()
 
@@ -124,16 +122,9 @@ class CartViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     def list_items(self, req, cart_id=None):
-        if not cart_id:
-            return Response(
-                {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
         cart_id = validate_integer(cart_id)
         if cart_id is None:
-            return Response(
-                {"error": "Invalid Cart Id"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return format_error(ERROR_MESSAGES["invalid_cart_id"])
 
         cart_items = CartItem.objects.filter(cart_id=cart_id).select_related("item")
 
@@ -163,40 +154,29 @@ class CartViewSet(viewsets.ViewSet):
     def delete_cart_item(self, request, pk: None, cart_item_id: None):
         cart_id = validate_integer(pk)
         if cart_id is None:
-            return Response(
-                {"error": "Valid Cart Id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return format_error(ERROR_MESSAGES["invalid_cart_id"])
 
         item_id = validate_integer(cart_item_id)
         if item_id is None:
-            return Response(
-                {"error": "Valid Item Id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return format_error(ERROR_MESSAGES["invalid_item_id"])
 
         user_id = validate_integer(request.data.get(USER_ID))
         if user_id is None:
-            return Response(
-                {"error": "Valid User Id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return format_error(ERROR_MESSAGES["invalid_user_id"])
 
         try:
             # Get cart belonging to user by id
             cart = Cart.objects.get(id=cart_id, user_id=user_id)
         except Cart.DoesNotExist:
-            return Response(
-                {"error": "No cart associated with provided Id"},
-                status=status.HTTP_404_NOT_FOUND,
+            return format_error(
+                ERROR_MESSAGES["cart_does_not_exist"], status.HTTP_404_NOT_FOUND
             )
 
         try:
             cart_item = CartItem.objects.get(id=item_id, cart_id=cart.id)
         except CartItem.DoesNotExist:
-            return Response(
-                {"error": "Cart item does not exist"},
-                status=status.HTTP_404_NOT_FOUND,
+            return format_error(
+                ERROR_MESSAGES["item_does_not_exist"], status.HTTP_404_NOT_FOUND
             )
 
         cart_item.delete()
@@ -211,10 +191,7 @@ class CartViewSet(viewsets.ViewSet):
     def create(self, request):
         user_id = validate_integer(request.data.get(USER_ID))
         if user_id is None:
-            return Response(
-                {"error": "Valid User Id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return format_error(ERROR_MESSAGES["invalid_user_id"])
 
         try:
             user = User.objects.get(id=user_id)
@@ -248,9 +225,8 @@ class CartViewSet(viewsets.ViewSet):
         if item.quantity >= quantity:
             # Validate cart belongs to user
             if user.id != cart.user.id:
-                return Response(
-                    {"error": "Cart does not exist for user"},
-                    status=status.HTTP_404_NOT_FOUND,
+                return format_error(
+                    ERROR_MESSAGES["invalid_cart_id"], status.HTTP_404_NOT_FOUND
                 )
 
             cart_item, created = CartItem.objects.get_or_create(
@@ -263,10 +239,7 @@ class CartViewSet(viewsets.ViewSet):
             if not created:
                 total_requested_quantity = cart_item.quantity + quantity
                 if item.quantity < total_requested_quantity:
-                    return Response(
-                        {"error": "Requested quantity is not available"},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+                    return format_error(ERROR_MESSAGES["quantity_unavailable"])
 
                 cart_item.quantity = total_requested_quantity
                 cart_item.save()
@@ -275,7 +248,9 @@ class CartViewSet(viewsets.ViewSet):
             return Response({"cart": serializer.data}, status=status.HTTP_200_OK)
         else:
             return Response(
-                {"error": "Requested quantity is not available"},
+                {
+                    "error": ERROR_MESSAGES["quantity_unavailable"],
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -291,10 +266,7 @@ class CartViewSet(viewsets.ViewSet):
 
         serializer = PurchaseCartSerializer(data=data)
         if not serializer.is_valid():
-            return Response(
-                {"error": serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return format_error(serializer.errors)
 
         validated = serializer.validated_data
         user = validated[USER_ID]
@@ -319,15 +291,13 @@ class CartViewSet(viewsets.ViewSet):
             # Fetching cart by id and user
             cart = Cart.objects.get(user=user, id=cart_id)
         except Cart.DoesNotExist:
-            return Response(
-                {"error": "No cart associated with provided Id"},
-                status=status.HTTP_404_NOT_FOUND,
+            return format_error(
+                ERROR_MESSAGES["cart_does_not_exist"], status.HTTP_404_NOT_FOUND
             )
 
         if not cart.items.exists():
-            return Response(
-                {"error": "Cart has no items"},
-                status=status.HTTP_400_BAD_REQUEST,
+            return format_error(
+                ERROR_MESSAGES["no_cart_items"], status.HTTP_400_BAD_REQUEST
             )
 
         # Wrapping cart_item logic in atomic transaction for data consistency
@@ -340,9 +310,9 @@ class CartViewSet(viewsets.ViewSet):
                     .select_related("item")
                 )
                 if not cart_items.exists():
-                    return Response(
-                        {"error": "No cart items for cart"},
-                        status=status.HTTP_404_NOT_FOUND,
+                    return format_error(
+                        ERROR_MESSAGES["item_does_not_exist"],
+                        status.HTTP_404_NOT_FOUND,
                     )
 
                 # Looping through all cart items and updating quantity
