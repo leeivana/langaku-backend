@@ -149,6 +149,16 @@ class CartViewSet(viewsets.ViewSet):
         serializer = CartSerializer(carts, many=True)
         return Response({"carts": serializer.data}, status=status.HTTP_200_OK)
 
+    def retrieve(self, request, pk):
+        cart_id = validate_integer(pk)
+        if cart_id is None:
+            return format_error(ERROR_MESSAGES["invalid_cart_id"])
+
+        cart = Cart.objects.get(id=cart_id)
+        serializer = CartSerializer(cart)
+
+        return Response({"cart": serializer.data}, status.HTTP_200_OK)
+
     @csrf_exempt
     @action(detail=True, methods=["delete"], url_path="items/(?P<cart_item_id>[^/.]+)")
     def delete_cart_item(self, request, pk: None, cart_item_id: None):
@@ -221,38 +231,36 @@ class CartViewSet(viewsets.ViewSet):
         cart = validated[CART_ID]
         quantity = validated[QUANTITY]
 
-        # Check if requested quantity is available
-        if item.quantity >= quantity:
-            # Validate cart belongs to user
-            if user.id != cart.user.id:
-                return format_error(
-                    ERROR_MESSAGES["invalid_cart_id"], status.HTTP_404_NOT_FOUND
-                )
+        if user.id != cart.user.id:
+            return format_error(
+                ERROR_MESSAGES["invalid_cart_id"], status.HTTP_404_NOT_FOUND
+            )
 
-            cart_item, created = CartItem.objects.get_or_create(
+        try:
+            # Get existing cart item
+            cart_item = CartItem.objects.get(cart=cart, item=item)
+            # Derive new quantity
+            new_total_quantity = cart_item.quantity + quantity
+
+            if new_total_quantity > item.quantity:
+                return format_error(ERROR_MESSAGES["quantity_unavailable"])
+
+            cart_item.quantity = new_total_quantity
+            cart_item.save()
+        except CartItem.DoesNotExist:
+            # In the case where the cart item does not exist
+            if quantity > item.quantity:
+                return format_error(ERROR_MESSAGES["quantity_unavailable"])
+
+            # Create new cart item
+            cart_item = CartItem.objects.create(
                 cart=cart,
                 item=item,
-                defaults={QUANTITY: quantity},
+                quantity=quantity,
             )
 
-            # Check if total request quantity is available
-            if not created:
-                total_requested_quantity = cart_item.quantity + quantity
-                if item.quantity < total_requested_quantity:
-                    return format_error(ERROR_MESSAGES["quantity_unavailable"])
-
-                cart_item.quantity = total_requested_quantity
-                cart_item.save()
-
-            serializer = CartSerializer(cart, many=False)
-            return Response({"cart": serializer.data}, status=status.HTTP_200_OK)
-        else:
-            return Response(
-                {
-                    "error": ERROR_MESSAGES["quantity_unavailable"],
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        serializer = CartSerializer(cart, many=False)
+        return Response({"cart": serializer.data}, status=status.HTTP_200_OK)
 
     @csrf_exempt
     @action(detail=True, methods=["post"])

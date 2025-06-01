@@ -38,6 +38,27 @@ class TestCartsAPI(AuthenticatedTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data["cart"]["items"]), 0)
 
+    # Retrieve single cart
+    def test_get_cart(self):
+        cart = self.create_and_return_cart()
+        response = self.client.get(URL_MAP["get"](cart.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["cart"]["items"]), 0)
+
+    def test_get_cart_with_item(self):
+        cart = self.create_and_return_cart()
+        item = list(self.cheaper_items.values())[0]
+        self.client.post(
+            URL_MAP["add_item"](cart.id),
+            data={USER_ID: self.user.id, QUANTITY: 1, ITEM_ID: item.id},
+        )
+        response = self.client.get(URL_MAP["get"](cart.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        items = response.data["cart"]["items"]
+        print(response.data)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0], item.id)
+
     # Purchase cart tests
     def test_purchase_cart_no_idempotency_key(self):
         cart = self.create_and_return_cart()
