@@ -1,5 +1,6 @@
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import viewsets, status
+from rest_framework.exceptions import NotFound
 from rest_framework.authentication import (
     BasicAuthentication,
     SessionAuthentication,
@@ -15,6 +16,8 @@ from .serializers import (
     CartSerializer,
     IdempotencyKeySerializer,
     CartItemSerializer,
+    AddCartItemSerializer,
+    PurchaseCartSerializer,
 )
 from .constants import (
     USER_ID,
@@ -28,6 +31,7 @@ from .constants import (
     STATUS_SUCCESS,
     STATUS_FAILED,
     STATUS_PENDING,
+    CART_ID,
 )
 
 
@@ -62,6 +66,23 @@ def initialize_data(request):
         )
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def parse_serializer_error(serializer):
+    errors = serializer.errors
+    is_not_found = False
+    for _, messages in errors.items():
+        for msg in messages:
+            if isinstance(msg, str) and "associated" in msg:
+                is_not_found = True
+                break
+
+    return Response(
+        {"error": errors},
+        status=(
+            status.HTTP_404_NOT_FOUND if is_not_found else status.HTTP_400_BAD_REQUEST
+        ),
+    )
 
 
 class ItemViewSet(viewsets.ViewSet):
@@ -114,7 +135,7 @@ class CartViewSet(viewsets.ViewSet):
                 {"error": "Invalid Cart Id"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        cart_items = CartItem.objects.filter(cart_id=cart_id)
+        cart_items = CartItem.objects.filter(cart_id=cart_id).select_related("item")
 
         response = []
         for cart_item in cart_items:
@@ -166,7 +187,7 @@ class CartViewSet(viewsets.ViewSet):
             cart = Cart.objects.get(id=cart_id, user_id=user_id)
         except Cart.DoesNotExist:
             return Response(
-                {"error": "Cart does not exist for user"},
+                {"error": "No cart associated with provided Id"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -210,52 +231,23 @@ class CartViewSet(viewsets.ViewSet):
     @csrf_exempt
     @action(detail=True, methods=["post"], url_path="items")
     def add(self, request, pk: None):
-        cart_id = validate_integer(pk)
-        if cart_id is None:
-            return Response(
-                {"error": "Valid Cart Id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        data = request.POST.copy()
+        data[CART_ID] = pk
 
-        user_id = validate_integer(request.data.get(USER_ID))
-        if user_id is None:
-            return Response(
-                {"error": "Valid User Id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        serializer = AddCartItemSerializer(data=data)
+        if not serializer.is_valid():
+            return parse_serializer_error(serializer)
 
-        quantity = validate_integer(request.data.get(QUANTITY))
-        if quantity is None:
-            return Response(
-                {"error": "Quantity is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if quantity <= 0:
-            return Response(
-                {"error": "Quantity must be a positive integer"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        item_id = validate_integer(request.data.get(ITEM_ID))
-        if item_id is None:
-            return Response(
-                {"error": "Valid Item Id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            item = Item.objects.get(id=item_id)
-        except Item.DoesNotExist:
-            return Response(
-                {"error": "Item not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        validated = serializer.validated_data
+        item = validated[ITEM_ID]
+        user = validated[USER_ID]
+        cart = validated[CART_ID]
+        quantity = validated[QUANTITY]
 
         # Check if requested quantity is available
         if item.quantity >= quantity:
-            # Get cart for user
-            try:
-                cart = Cart.objects.get(id=cart_id, user_id=user_id)
-            except Cart.DoesNotExist:
+            # Validate cart belongs to user
+            if user.id != cart.user.id:
                 return Response(
                     {"error": "Cart does not exist for user"},
                     status=status.HTTP_404_NOT_FOUND,
@@ -264,7 +256,7 @@ class CartViewSet(viewsets.ViewSet):
             cart_item, created = CartItem.objects.get_or_create(
                 cart=cart,
                 item=item,
-                defaults={"quantity": quantity},
+                defaults={QUANTITY: quantity},
             )
 
             # Check if total request quantity is available
@@ -290,29 +282,24 @@ class CartViewSet(viewsets.ViewSet):
     @csrf_exempt
     @action(detail=True, methods=["post"])
     def purchase(self, request, pk=None):
+        data = request.POST.copy()
         # Idempotency key is always required (either through request headers or in request data)
-        idempotency_key = request.headers.get(
+        data[IDEMPOTENCY_KEY] = request.headers.get(
             IDEMPOTENCY_KEY_HEADER
         ) or request.data.get(IDEMPOTENCY_KEY)
-        if not idempotency_key:
+        data[CART_ID] = pk
+
+        serializer = PurchaseCartSerializer(data=data)
+        if not serializer.is_valid():
             return Response(
-                {"error": "Idempotency key is required"},
+                {"error": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user_id = validate_integer(request.data.get(USER_ID))
-        if user_id is None:
-            return Response(
-                {"error": "User Id is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response(
-                {"error": "User does not exist"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        validated = serializer.validated_data
+        user = validated[USER_ID]
+        cart_id = validated[CART_ID]
+        idempotency_key = validated[IDEMPOTENCY_KEY]
 
         try:
             # If idempotency key exists, the same transaction has already happened
@@ -328,18 +315,12 @@ class CartViewSet(viewsets.ViewSet):
                 user=user, key=idempotency_key, status=STATUS_PENDING
             )
 
-        cart_id = validate_integer(pk)
-        if cart_id is None:
-            return Response(
-                {"error": "Cart Id is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
         try:
             # Fetching cart by id and user
             cart = Cart.objects.get(user=user, id=cart_id)
         except Cart.DoesNotExist:
             return Response(
-                {"error": "Cart does not exist"},
+                {"error": "No cart associated with provided Id"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -353,9 +334,11 @@ class CartViewSet(viewsets.ViewSet):
         try:
             with transaction.atomic():
                 # Using select_for_update to lock rows until transaction is completed
-                cart_items = CartItem.objects.filter(
-                    cart_id=cart.id
-                ).select_for_update()
+                cart_items = (
+                    CartItem.objects.filter(cart_id=cart.id)
+                    .select_for_update()
+                    .select_related("item")
+                )
                 if not cart_items.exists():
                     return Response(
                         {"error": "No cart items for cart"},

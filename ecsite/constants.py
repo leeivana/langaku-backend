@@ -1,6 +1,7 @@
 # Request Constants
 USER_ID = "user_id"
 ITEM_ID = "item_id"
+CART_ID = "cart_id"
 QUANTITY = "quantity"
 NAME = "name"
 MIN_PRICE = "min_price"
@@ -19,3 +20,8 @@ STATUS_CHOICES = [
     (STATUS_PENDING, "Pending"),
     (STATUS_FAILED, "Failed"),
 ]
+
+ERROR_MESSAGES = {
+    ITEM_ID: "Valid Item Id is required",
+    USER_ID: "Valid User Id is required",
+}

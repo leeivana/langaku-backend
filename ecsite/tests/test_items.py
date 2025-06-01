@@ -1,9 +1,8 @@
 from rest_framework import status
+from ecsite.constants import NAME, MAX_PRICE, MIN_PRICE
 from .base import AuthenticatedTestCase, ITEM_COUNT
 from .base import ITEM_MIN_PRICE
-from ecsite.constants import NAME, MAX_PRICE, MIN_PRICE
-
-ITEMS_URL = "/api/v1/items/"
+from .constants import ITEMS_URL
 
 
 class TestItemAPI(AuthenticatedTestCase):
