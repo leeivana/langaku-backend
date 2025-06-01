@@ -1,5 +1,19 @@
 # E-Commerce API with Python and Django
 
+## Table of Contents
+- [Setup](#setup)
+- [API Design](#api-design)
+  - [Item Listing](#item-listing)
+  - [Create Cart](#create-cart)
+  - [Add Item to Cart](#add-item-to-cart)
+  - [Purchase Items in Cart](#purchase-items-in-cart)
+- [System Design](#system-design)
+  - [Option 1: Latest Stock and Price at Checkout](#option-1-latest-stock-and-price-at-checkout)
+  - [Option 2: Price and Stock is Locked When Added](#option-2-price-and-stock-is-locked-when-added)
+- [Case Study](#case-study)
+  - [How Stock Fluctuations Are Handled](#how-stock-fluctuations-are-handled)
+
+
 ## Setup
 
 Load initial data
