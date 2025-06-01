@@ -12,6 +12,7 @@
   - [Option 2: Price and Stock is Locked When Added](#option-2-price-and-stock-is-locked-when-added)
 - [Case Study](#case-study)
   - [How Stock Fluctuations Are Handled](#how-stock-fluctuations-are-handled)
+  - [How Price Fluctuations Are Handled](#how-price-fluctuations-are-handled)
 
 
 ## Setup
@@ -27,7 +28,7 @@ Admin User
 -   username: testuser
 -   password: testpassword
 
-# API Design
+## API Design
 
 ### Item Listing
 
@@ -47,7 +48,7 @@ Retrieves an array of items (id, name, price, quantity).
 
 #### Response
 
-```
+```json
 {
     "items": [
         {
@@ -82,7 +83,7 @@ If not, the new created cart information will be returned.
 
 #### Request
 
-```
+```json
 {
     "user_id": int
 }
@@ -90,7 +91,7 @@ If not, the new created cart information will be returned.
 
 #### Response
 
-```
+```json
 {
     "cart": {
         "items": []
@@ -110,7 +111,7 @@ This endpoint returns the cart data given a cart_id
 
 #### Response
 
-```
+```json
 {
     "cart": {
         "items": [1, 2, 3]
@@ -132,7 +133,7 @@ The below cases are handed:
 
 #### Request
 
-```
+```json
 {
     "user_id": int,
     // Quantity value must equal or greater than 1
@@ -143,7 +144,7 @@ The below cases are handed:
 
 #### Response
 
-```
+```json
 {
     "cart": {
         "items": [item_id]
@@ -161,7 +162,7 @@ The deleted cart data is returned.
 
 #### Request
 
-```
+```json
 {
     "user_id": int
 }
@@ -169,7 +170,7 @@ The deleted cart data is returned.
 
 #### Response
 
-```
+```json
 {
     "cart": {
         "items": [item_id]
@@ -190,7 +191,7 @@ The response returns the purchased cart item information
 
 #### Request
 
-```
+```json
 {
     "idempotency_key": str,
     "user_id": str
@@ -199,18 +200,18 @@ The response returns the purchased cart item information
 
 #### Response
 
-```
+```json
 {
-    'response': [
+    "response": [
         {
-            'item': 1,
-            'quantity': 1
+            "item": 1,
+            "quantity": 1
         }
     ]
 }
 ```
 
-# System Design
+## System Design
 
 ### Checkout Behaviour (Stock & Price Fluctuations)
 
@@ -251,7 +252,7 @@ At checkout, the system would lock in the price and stock (quantity) for a certa
 -   Inactive carts can fluctuate item stock inventory
     -   If multiple people add items to their cart and do not check out, the remaining stock count is inaccurate
 
-# Case Study
+## Case Study
 
 The current implementation utilizes Option 1 (Latest stock & price at checkout).
 
@@ -282,7 +283,7 @@ The current implementation of cart purchasing does not support price fluctuation
 -   Storing the purchase price into the `CartItem`
 -   Validating price when item was added to cart to current price of the item within the database
 
-# Future Improvements
+## Future Improvements
 
 -   Price flucutation alert (deviating between cart item price and item price)
 -   Pagination / limits for item search endpoint
